@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "767644405385",
+    "firebase_url": "https://comuna-bigand-default-rtdb.firebaseio.com",
+    "project_id": "comuna-bigand",
+    "storage_bucket": "comuna-bigand.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:767644405385:android:84ae787c2d0d0693004058",
+        "android_client_info": {
+          "package_name": "com.comunaservicios.bigand"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkq2JN2OgCCcFRiapk64uCUefuEack1ZY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:767644405385:android:393261e0af9fdaab004058",
+        "android_client_info": {
+          "package_name": "com.example.comunaServiciosBigand"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkq2JN2OgCCcFRiapk64uCUefuEack1ZY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

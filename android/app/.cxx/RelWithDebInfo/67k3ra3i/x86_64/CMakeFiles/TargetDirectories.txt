@@ -1,0 +1,2 @@
+/Users/rodrigoreynoso/Proyectos/comuna/comuna_servicios/android/app/.cxx/RelWithDebInfo/67k3ra3i/x86_64/CMakeFiles/edit_cache.dir
+/Users/rodrigoreynoso/Proyectos/comuna/comuna_servicios/android/app/.cxx/RelWithDebInfo/67k3ra3i/x86_64/CMakeFiles/rebuild_cache.dir
