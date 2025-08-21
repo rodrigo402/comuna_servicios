@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:comuna_servicios/models/button_model.dart';
 import 'package:comuna_servicios/services/cache_service.dart';
