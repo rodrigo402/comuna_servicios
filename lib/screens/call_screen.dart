@@ -6,6 +6,7 @@ import 'package:comuna_servicios/services/cache_service.dart';
 import 'package:comuna_servicios/services/firebase_service.dart';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class CallScreen extends StatefulWidget {
@@ -75,12 +76,54 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   void _callNumber(String number) async {
-    final uri = Uri(scheme: 'tel', path: number);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri);
-    } else {
-      debugPrint('No se pudo realizar la llamada.');
+    final telUri = Uri(scheme: 'tel', path: number);
+    final ftAudioUri = Uri.parse('facetime-audio:$number');
+
+    try {
+      if (await canLaunchUrl(telUri)) {
+        await launchUrl(telUri, mode: LaunchMode.externalApplication);
+        return;
+      }
+
+      if (await canLaunchUrl(ftAudioUri)) {
+        await launchUrl(ftAudioUri, mode: LaunchMode.externalApplication);
+        return;
+      }
+
+      _showCantCallDialog(number);
+    } catch (e) {
+      debugPrint('Error al intentar llamar: $e');
+      _showCantCallDialog(number);
     }
+  }
+
+  void _showCantCallDialog(String number) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('No se puede realizar la llamada'),
+        content: Text(
+          'Este dispositivo no puede hacer llamadas telefónicas.\n'
+          'Número: $number',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: number));
+              Navigator.of(ctx).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Número copiado')),
+              );
+            },
+            child: const Text('Copiar número'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _openUrl(String url) async {
