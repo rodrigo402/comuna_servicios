@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:comuna_servicios/models/button_model.dart';
@@ -20,6 +21,42 @@ class CallScreen extends StatefulWidget {
   State<CallScreen> createState() => _CallScreenState();
 }
 
+/* =====================  Recientes (local)  ===================== */
+
+const _kRecents = 'recent_items';
+
+class RecentItem {
+  final String id;
+  final String name;
+  final String? phone;
+  final String? url;
+  final int ts; // epoch ms
+
+  RecentItem({
+    required this.id,
+    required this.name,
+    this.phone,
+    this.url,
+    required this.ts,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'name': name,
+        'phone': phone,
+        'url': url,
+        'ts': ts,
+      };
+
+  static RecentItem fromMap(Map<String, dynamic> m) => RecentItem(
+        id: m['id'] ?? '',
+        name: m['name'] ?? '',
+        phone: m['phone'],
+        url: m['url'],
+        ts: m['ts'] ?? 0,
+      );
+}
+
 class _CallScreenState extends State<CallScreen> {
   final _firebaseService = FirebaseService();
   final _cacheService = CacheService();
@@ -28,16 +65,26 @@ class _CallScreenState extends State<CallScreen> {
   List<ButtonModel> _buttons = [];
   bool _isLoading = true;
 
+  // UX
   Set<String> _favorites = <String>{};
   String _query = '';
+
+  // Recientes + Filtros
+  List<RecentItem> _recents = [];
+  String? _activeFilter; // null=Todos | emerg | salud | serv | adm
+
+  /* =====================  lifecycle  ===================== */
 
   @override
   void initState() {
     super.initState();
     _loadFavorites();
+    _loadRecents();
     _loadCachedData();
     _checkConnectionAndFetchData();
   }
+
+  /* =====================  favoritos  ===================== */
 
   Future<void> _loadFavorites() async {
     _favorites = await _favoritesService.load();
@@ -57,8 +104,52 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   String _buttonId(ButtonModel b) => b.name.trim().toLowerCase();
-
   String _subButtonId(ButtonModel parent, ButtonModel sub) => '${_buttonId(parent)}__${sub.name.trim().toLowerCase()}';
+
+  /* =====================  recientes  ===================== */
+
+  Future<void> _loadRecents() async {
+    final p = await SharedPreferences.getInstance();
+    final s = p.getString(_kRecents);
+    if (s == null) return;
+    final List data = jsonDecode(s);
+    _recents = data.map((e) => RecentItem.fromMap(Map<String, dynamic>.from(e))).toList()..sort((a, b) => b.ts.compareTo(a.ts));
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _saveRecents() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(
+      _kRecents,
+      jsonEncode(_recents.map((e) => e.toMap()).toList()),
+    );
+  }
+
+  Future<void> _trackUse({
+    required String id,
+    required String name,
+    String? phone,
+    String? url,
+  }) async {
+    _recents.removeWhere((r) => r.id == id);
+    _recents.insert(
+      0,
+      RecentItem(
+        id: id,
+        name: name,
+        phone: phone,
+        url: url,
+        ts: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
+    if (_recents.length > 12) {
+      _recents = _recents.take(12).toList();
+    }
+    await _saveRecents();
+    if (mounted) setState(() {});
+  }
+
+  /* =====================  cache / firestore  ===================== */
 
   Future<void> _loadCachedData() async {
     try {
@@ -89,39 +180,13 @@ class _CallScreenState extends State<CallScreen> {
   void _listenToFirestoreChanges() {
     _firebaseService.getButtonsStream().listen((items) async {
       final list = items.where((it) => it.visible).toList()..sort((a, b) => a.order.compareTo(b.order));
+
       setState(() => _buttons = list);
       await _cacheService.saveData('buttons', list.map((e) => e.toMap()).toList());
     });
   }
 
-  String _searchHintExamples() {
-    final Map<String, int> nameToOrder = {};
-
-    for (final b in _buttons) {
-      if (b.visible) {
-        nameToOrder[b.name] = b.order;
-        for (final s in (b.subButtons ?? const [])) {
-          if (s.visible) {
-            final ord = s.order ?? 999;
-            nameToOrder.update(s.name, (old) => old < ord ? old : ord, ifAbsent: () => ord);
-          }
-        }
-      }
-    }
-
-    if (nameToOrder.isEmpty) return '';
-
-    final ordered = nameToOrder.entries.toList()
-      ..sort((a, b) {
-        final byOrder = a.value.compareTo(b.value);
-        return byOrder != 0 ? byOrder : a.key.length.compareTo(b.key.length);
-      });
-
-    final top = ordered.take(3).map((e) => e.key).toList();
-    final hasMore = ordered.length > 3;
-
-    return hasMore ? '${top.join(', ')}...' : top.join(', ');
-  }
+  /* =====================  acciones base  ===================== */
 
   Future<void> _callNumber(String number) async {
     final telUri = Uri(scheme: 'tel', path: number);
@@ -222,12 +287,30 @@ END:VCARD
     }
   }
 
+  /* =====================  búsqueda + filtros  ===================== */
+
   bool _matchesQuery(ButtonModel b) {
     if (_query.isEmpty) return true;
     final q = _normalize(_query);
     final hitTitle = _normalize(b.name).contains(q);
     final hitSub = (b.subButtons ?? const []).where((s) => s.visible).any((s) => _normalize(s.name).contains(q));
     return hitTitle || hitSub;
+  }
+
+  bool _passesFilter(ButtonModel b) {
+    if (_activeFilter == null) return true;
+    final n = _normalize(b.name);
+    switch (_activeFilter) {
+      case 'emerg':
+        return n.contains('bombero') || n.contains('polic') || n.contains('ambul') || n.contains('emergen') || n.contains('guardia');
+      case 'salud':
+        return n.contains('salud') || n.contains('hospital') || n.contains('clinica') || n.contains('médic') || n.contains('medic') || n.contains('vacun');
+      case 'serv':
+        return n.contains('luz') || n.contains('energia') || n.contains('energía') || n.contains('gas') || n.contains('agua') || n.contains('cloaca') || n.contains('residu') || n.contains('basura');
+      case 'adm':
+        return n.contains('comuna') || n.contains('municip') || n.contains('impuesto') || n.contains('tramite') || n.contains('trámite') || n.contains('rentas') || n.contains('patente');
+    }
+    return true;
   }
 
   String _normalize(String s) => s
@@ -239,12 +322,49 @@ END:VCARD
       .replaceAll(RegExp(r'[úùü]'), 'u')
       .replaceAll('ñ', 'n');
 
+  /* =====================  hint dinámico del buscador  ===================== */
+
+  String _searchHintExamples() {
+    final Map<String, int> nameToOrder = {};
+
+    for (final b in _buttons) {
+      if (b.visible) {
+        nameToOrder[b.name] = b.order;
+        for (final s in (b.subButtons ?? const [])) {
+          if (s.visible) {
+            final ord = s.order ?? 999;
+            nameToOrder.update(
+              s.name,
+              (old) => old < ord ? old : ord,
+              ifAbsent: () => ord,
+            );
+          }
+        }
+      }
+    }
+
+    if (nameToOrder.isEmpty) return '';
+
+    final ordered = nameToOrder.entries.toList()
+      ..sort((a, b) {
+        final byOrder = a.value.compareTo(b.value);
+        return byOrder != 0 ? byOrder : a.key.length.compareTo(b.key.length);
+      });
+
+    final top = ordered.take(3).map((e) => e.key).toList();
+    final hasMore = ordered.length > 3;
+
+    return hasMore ? '${top.join(', ')}...' : top.join(', ');
+  }
+
+  /* =====================  UI  ===================== */
+
   @override
   Widget build(BuildContext context) {
     final hint = _searchHintExamples();
     final hintText = hint.isEmpty ? 'Buscar' : 'Buscar ($hint)';
 
-    final filtered = _buttons.where(_matchesQuery).toList()
+    final filtered = _buttons.where(_matchesQuery).where(_passesFilter).toList()
       ..sort((a, b) {
         final af = _favorites.contains(_buttonId(a));
         final bf = _favorites.contains(_buttonId(b));
@@ -258,6 +378,7 @@ END:VCARD
 
     return Column(
       children: [
+        // buscador
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: TextField(
@@ -270,6 +391,68 @@ END:VCARD
             onChanged: (v) => setState(() => _query = v),
           ),
         ),
+
+        // filtros por categoría
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildFilterChip(null, 'Todos'),
+                const SizedBox(width: 8),
+                _buildFilterChip('emerg', 'Emergencias'),
+                const SizedBox(width: 8),
+                _buildFilterChip('adm', 'Administración'),
+                const SizedBox(width: 8),
+                _buildFilterChip('serv', 'Servicios'),
+                const SizedBox(width: 8),
+                _buildFilterChip('salud', 'Salud'),
+              ],
+            ),
+          ),
+        ),
+
+        // recientes (carrusel horizontal con eliminar)
+        if (_recents.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Text('Recientes:', style: TextStyle(fontWeight: FontWeight.w600)),
+                const SizedBox(width: 10),
+                // Hace scroll horizontal y evita overflow
+                Expanded(
+                  child: SizedBox(
+                    height: 36, // alto cómodo para chips
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: EdgeInsets.zero,
+                      itemBuilder: (context, index) {
+                        final r = _recents[index];
+                        return InputChip(
+                          label: Text(r.name, overflow: TextOverflow.ellipsis),
+                          onPressed: () {
+                            if (r.phone != null && r.phone!.isNotEmpty) {
+                              _callNumber(r.phone!);
+                            } else if (r.url != null && r.url!.isNotEmpty) {
+                              _openUrl(r.url!);
+                            }
+                          },
+                          onDeleted: () => _removeRecent(r.id), // ❌ para borrar
+                        );
+                      },
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemCount: _recents.length.clamp(0, 20), // muestra hasta 20
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 6),
+        // lista
         Expanded(
           child: filtered.isEmpty
               ? const Center(child: Text('Sin resultados'))
@@ -281,6 +464,15 @@ END:VCARD
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildFilterChip(String? key, String label) {
+    final selected = _activeFilter == key;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => setState(() => _activeFilter = key),
     );
   }
 
@@ -297,10 +489,7 @@ END:VCARD
           spacing: 4,
           children: [
             IconButton(
-              icon: Icon(
-                fav ? Icons.star : Icons.star_border,
-                color: fav ? Colors.amber : null,
-              ),
+              icon: Icon(fav ? Icons.star : Icons.star_border, color: fav ? Colors.amber : null),
               tooltip: fav ? 'Quitar de favoritos' : 'Agregar a favoritos',
               onPressed: () => _toggleFavoriteId(id),
             ),
@@ -315,15 +504,24 @@ END:VCARD
             ),
           ],
         ),
-        onTap: () {
+        onTap: () async {
           if (button.phone != null && button.phone!.isNotEmpty) {
+            await _trackUse(id: id, name: button.name, phone: button.phone);
             _callNumber(button.phone!);
           } else if (button.url != null && button.url!.isNotEmpty) {
+            await _trackUse(id: id, name: button.name, url: button.url);
             _openUrl(button.url!);
           }
         },
       ),
     );
+  }
+
+  void _removeRecent(String id) async {
+    setState(() {
+      _recents.removeWhere((r) => r.id == id);
+    });
+    await _saveRecents();
   }
 
   Widget _buildExpandableTile(ButtonModel parent) {
@@ -341,10 +539,7 @@ END:VCARD
               child: Text(parent.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
             ),
             IconButton(
-              icon: Icon(
-                parentFav ? Icons.star : Icons.star_border,
-                color: parentFav ? Colors.amber : null,
-              ),
+              icon: Icon(parentFav ? Icons.star : Icons.star_border, color: parentFav ? Colors.amber : null),
               tooltip: parentFav ? 'Quitar de favoritos' : 'Agregar a favoritos',
               onPressed: () => _toggleFavoriteId(parentId),
             ),
@@ -372,10 +567,7 @@ END:VCARD
                 spacing: 4,
                 children: [
                   IconButton(
-                    icon: Icon(
-                      fav ? Icons.star : Icons.star_border,
-                      color: fav ? Colors.amber : null,
-                    ),
+                    icon: Icon(fav ? Icons.star : Icons.star_border, color: fav ? Colors.amber : null),
                     tooltip: fav ? 'Quitar de favoritos' : 'Agregar a favoritos',
                     onPressed: () => _toggleFavoriteId(subId),
                   ),
@@ -390,10 +582,12 @@ END:VCARD
                   ),
                 ],
               ),
-              onTap: () {
+              onTap: () async {
                 if (sub.phone != null && sub.phone!.isNotEmpty) {
+                  await _trackUse(id: subId, name: sub.name, phone: sub.phone);
                   _callNumber(sub.phone!);
                 } else if (sub.url != null && sub.url!.isNotEmpty) {
+                  await _trackUse(id: subId, name: sub.name, url: sub.url);
                   _openUrl(sub.url!);
                 }
               },
@@ -403,6 +597,8 @@ END:VCARD
       ),
     );
   }
+
+  /* =====================  hoja de acciones  ===================== */
 
   void _openActionsSheetFor({
     required String name,
@@ -429,10 +625,9 @@ END:VCARD
                 leading: const Icon(Icons.copy),
                 title: const Text('Copiar número'),
                 onTap: () async {
-                  final messenger = rootMessenger; 
-                  Navigator.pop(sheetCtx);
+                  Navigator.pop(sheetCtx); // cerrar antes del await
                   await Clipboard.setData(ClipboardData(text: phone));
-                  messenger.showSnackBar(
+                  rootMessenger.showSnackBar(
                     const SnackBar(content: Text('Número copiado')),
                   );
                 },
@@ -468,7 +663,7 @@ END:VCARD
                         ? '$name - $url'
                         : name;
 
-                final origin = _shareOriginRect(context);
+                final origin = _shareOriginRect(context); // capturado antes del await
 
                 await SharePlus.instance.share(
                   ShareParams(text: text, sharePositionOrigin: origin),
@@ -480,6 +675,8 @@ END:VCARD
       ),
     );
   }
+
+  /* =====================  utils  ===================== */
 
   Uint8List decodeBase64(String base64String) {
     try {
