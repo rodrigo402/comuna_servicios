@@ -1,12 +1,13 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/material.dart';
-import 'package:comuna_servicios/models/social_link_model.dart';
-import 'package:comuna_servicios/services/firebase_service.dart';
-import 'package:comuna_servicios/services/cache_service.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 import 'dart:typed_data';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:comuna_servicios/models/social_link_model.dart';
+import 'package:comuna_servicios/services/cache_service.dart';
+import 'package:comuna_servicios/services/firebase_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class ContactScreen extends StatefulWidget {
   const ContactScreen({super.key});
@@ -72,7 +73,11 @@ class _ContactScreenState extends State<ContactScreen> {
   }
 
   void _listenToFirestoreChanges() {
-    FirebaseFirestore.instance.collection('settings').doc('footer_title').snapshots().listen((snapshot) {
+    FirebaseFirestore.instance
+        .collection('settings')
+        .doc('footer_title')
+        .snapshots()
+        .listen((snapshot) {
       if (snapshot.exists) {
         String title = snapshot['title'] ?? 'Redes Sociales';
         if (_footerTitle != title) {
@@ -112,40 +117,55 @@ class _ContactScreenState extends State<ContactScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
         : _socialLinks.isEmpty
             ? const SizedBox.shrink()
-            : Container(
-                color: Colors.grey[200],
-                padding: const EdgeInsets.all(6.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16.0),
-                      child: Center(
-                        child: Text(
-                          _footerTitle,
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: _socialLinks.map((link) {
-                        return IconButton(
-                          icon: Image.memory(
-                            link.icon.isNotEmpty ? decodeBase64(link.icon) : Uint8List(0),
-                            width: 60,
-                            height: 60,
+            : ConstrainedBox(
+                constraints:
+                    const BoxConstraints(maxHeight: 120), // Limité la altura máxima a 120 píxeles
+                child: Material(
+                  color: scheme.surface,
+                  elevation: 2,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: Center(
+                            child: Text(
+                              _footerTitle,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: scheme.onSurface,
+                              ),
+                            ),
                           ),
-                          onPressed: () => _openLink(link.url),
-                          tooltip: link.platform,
-                        );
-                      }).toList(),
+                        ),
+                        Expanded(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: _socialLinks.map((link) {
+                              return IconButton(
+                                icon: Image.memory(
+                                  link.icon.isNotEmpty ? decodeBase64(link.icon) : Uint8List(0),
+                                  width: 40,
+                                  height: 40,
+                                ),
+                                onPressed: () => _openLink(link.url),
+                                tooltip: link.platform,
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               );
   }
@@ -158,7 +178,8 @@ class _ContactScreenState extends State<ContactScreen> {
       }
 
       if (base64String.length % 4 != 0) {
-        base64String = base64String.padRight(base64String.length + (4 - base64String.length % 4), '=');
+        base64String =
+            base64String.padRight(base64String.length + (4 - base64String.length % 4), '=');
       }
 
       return base64Decode(base64String);
