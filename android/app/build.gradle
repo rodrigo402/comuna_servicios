@@ -35,7 +35,7 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.comunaservicios.bigand"
     compileSdk 35
-
+    ndkVersion "28.2.13676358"
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
@@ -64,6 +64,11 @@ android {
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
         multiDexEnabled true
+        externalNativeBuild {
+            cmake {
+                // path to CMakeLists.txt is configured in module-level CMake files (if any)
+            }
+        }
     }
 
     signingConfigs {
